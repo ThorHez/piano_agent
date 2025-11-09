@@ -1,0 +1,70 @@
+# Termitech Auto-Piano API 配置文件
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true  # 开发模式
+  workers: 1
+
+# JWT认证配置
+auth:
+  enabled: false  # 是否启用JWT认证（false=关闭认证，true=开启认证）
+  secret_key: "your-secret-key-here-change-in-production"
+  algorithm: "HS256"
+  access_token_expire_minutes: 30
+
+# CORS配置
+cors:
+  allow_origins:
+    - "*"  # 允许所有来源访问（生产环境建议指定具体域名）
+  allow_credentials: true
+  allow_methods: ["*"]
+  allow_headers: ["*"]
+
+# 数据库配置
+database:
+  type: "sqlite"  # sqlite, postgresql, mysql
+  path: "./data/piano_agent.db"  # SQLite数据库文件路径
+  url: "sqlite:///./data/piano_agent.db"  # 完整数据库URL（可选）
+  echo: false  # 是否打印SQL语句（调试用）
+
+# 文件存储配置
+storage:
+  scores_path: "./data/scores"
+  uploads_path: "./data/uploads"
+  max_file_size: 10485760  # 10MB
+
+# 演奏配置
+performance:
+  default_tempo: 120
+  min_tempo: 20
+  max_tempo: 240
+  stream_buffer_size: 100
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/app.log"
+
+
+nx:
+  host: "192.168.1.100"
+  user: "ubuntu"
+  password: "your_password"
+
+voice:
+  url: "http://192.168.3.24:9331/voice/stream"
+
+
+performance:
+  stream_url: "http://192.168.3.24:5000/play_stream"
+  record_url: "http://localhost:8123/record"
+
+music:
+  download_url: "http://192.168.100.51:8080/download/music"
+
+midi:
+  base_dir: "/Users/hezhili/PycharmProjects/piano_agent_service/data/midi"
+

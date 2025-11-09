@@ -1,0 +1,483 @@
+openapi: 3.1.0
+info:
+  title: Termitech Auto-Piano API (SSE)
+  version: 1.1.0
+servers:
+  - url: https://api.termitech.local
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Message:
+      type: object
+      required: [id, sessionId, timestamp, type, content]
+      properties:
+        type: { type: string }
+        id: { type: string }
+        sessionId: { type: string }
+        timestamp: { type: string, format: date-time }
+        content: { type: string }
+        status: { type: int }
+
+    Role:
+      type: string
+      enum: [user, assistant, system]
+
+    DownloadRequest:
+      type: object
+      properties:
+        music_id: { type: int}
+        music_name: { type: string }
+
+    AnalyzeRequest:
+      type: object
+      properties:
+        music_id: { type: int}
+
+    AnalyzeResponse:
+      type: object
+      properties:
+        file_paths:
+          type: array
+          items: { type: string }
+
+    LearningBegin:
+      type: object
+      properties:
+        rtsp_url: { type: string }
+
+    LearningEnd:
+      type: object
+      properties:
+        file_paths:
+          type: array
+          items: { type: string }
+
+    ChatMessage:
+      type: object
+      required: [id, sessionId, role, content, timestamp]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        content: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    ChatTurnRequest:
+      type: object
+      required: [message]
+      properties:
+        sessionId: { type: string, nullable: true }
+        message: { type: string }
+        contextHints:
+          type: object
+          properties:
+            mode: { type: string, enum: [chat, perform], default: chat }
+            pieceId: { type: string, nullable: true }
+            tempo: { type: integer, minimum: 20, maximum: 240 }
+            hands: { type: string, enum: [both, left, right], default: both }
+
+    ChatTurnResponse:
+      type: object
+      required: [sessionId, assistantMessage]
+      properties:
+        sessionId: { type: string }
+        assistantMessage: { $ref: '#/components/schemas/ChatMessage' }
+        suggestedActions:
+          type: array
+          items:
+            type: string
+            enum: [start_performance, pause, resume, stop, pick_piece]
+        sseUrl:
+          type: string
+          description: "如果进入演奏/准备阶段，提供SSE地址 /performances/{id}/stream"
+
+    PerformanceStatus:
+      type: string
+      enum: [idle, preparing, playing, paused, ended, error]
+
+    PerformanceSession:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string }
+        status: { $ref: '#/components/schemas/PerformanceStatus' }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true }
+        endedAt: { type: string, format: date-time, nullable: true }
+        pieceId: { type: string, nullable: true }
+        tempo: { type: integer, default: 120 }
+        hands: { type: string, enum: [both, left, right], default: both }
+        sseUrl: { type: string }
+
+    StartPerformanceRequest:
+      type: object
+      properties:
+        pieceId: { type: string }
+        scoreUrl: { type: string, nullable: true }
+        tempo: { type: integer, default: 120 }
+        hands: { type: string, enum: [both, left, right], default: both }
+        previewOnly: { type: boolean, default: false }
+
+    ControlAction:
+      type: string
+      enum: [pause, resume, stop]
+
+    HistoryItem:
+      type: object
+      required: [id, pieceName, startedAt, durationSec, status]
+      properties:
+        id: { type: string }
+        pieceId: { type: string }
+        pieceName: { type: string }
+        startedAt: { type: string, format: date-time }
+        durationSec: { type: integer }
+        status: { $ref: '#/components/schemas/PerformanceStatus' }
+        success: { type: boolean }
+        accuracyScore: { type: number, minimum: 0, maximum: 1 }
+        errorNotes: { type: integer }
+        logUrl: { type: string, nullable: true }
+        replayId: { type: string, nullable: true }
+
+paths:
+  /chat:
+    summary: 聊天主接口，主要用于聊天界面的渲染
+    post:
+      responses:
+        '200':
+          description: "流式返回"
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/Message' }
+
+
+  /chat/voice:
+    get:
+      summary: 用于触发语音服务，调用介绍后返回完整的语音转文字结果
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/Message' }
+
+
+  /download/music:
+    post:
+      summary: 用于调用歌曲下载
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DownloadRequest' }
+      responses:
+        '200':
+          description: OK
+
+
+  /analyze_music:
+    post:
+      summary: 用于分析歌曲
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnalyzeRequest' }
+      responses:
+        '200':
+          description: "乐谱解析"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+
+  /learning_begin:
+    get:
+      summary: "学习模式启动"
+      responses:
+        '200':
+          description: "学习模式启动成功"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearningBegin' }
+
+
+  /learning_end:
+    get:
+      summary: "学习模式结束"
+      responses:
+        '200':
+          description: "学习模式结束"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearningEnd' }
+
+
+  /performance/stream:
+    post:
+      summary: 曲目演奏接口
+      responses:
+        '200':
+          description: "流式返回"
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/Message' }
+
+
+  /history:
+    get:
+      summary: 左侧列表：历史演奏记录
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/PerformanceStatus' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HistoryItem' }
+
+  /chat/history:
+    get:
+      summary: 获取会话消息
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChatMessage' }
+
+  /performances:
+    post:
+      summary: 创建/启动演奏（驱动中间实时展示）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartPerformanceRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PerformanceSession' }
+
+  /performances/{id}:
+    get:
+      summary: 获取演奏会话状态
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PerformanceSession' }
+
+  /performances/{id}/control:
+    post:
+      summary: 控制演奏（暂停/继续/停止）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { $ref: '#/components/schemas/ControlAction' }
+      responses:
+        '204':
+          description: No Content
+
+  /performances/{id}/stream:
+    get:
+      summary: 实时事件流（SSE，Content-Type: text/event-stream）
+      description: |
+        事件类型（event 字段）：
+        - note_frame：按键帧（多个 note_on/note_off）
+        - hand_pose：手部/键位指示
+        - status：状态更新（preparing/playing/paused/ended/error）
+        - log：实时日志
+        - ping：心跳（便于前端维持连接）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema: { type: string }
+          description: 断线重连时从该ID继续
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                example:
+                  summary: SSE示例
+                  value: |
+                    id: 1717995012345
+                    event: status
+                    data: {"status":"preparing","message":"下载曲谱…"}
+                    
+                    id: 1717995013000
+                    event: note_frame
+                    data: {"ts":1717995013000,"events":[{"t":0,"kind":"note_on","midi":60,"velocity":96,"hand":"R"}]}
+                    
+                    id: 1717995013100
+                    event: hand_pose
+                    data: {"ts":1717995013100,"leftKeyIndex":24,"rightKeyIndex":40}
+                    
+                    : ping
+                    event: ping
+                    data: {}
+
+  /performances/{id}/events:
+    get:
+      summary: 获取离线事件（回放/导出）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  noteEvents:
+                    type: array
+                    items:
+                      type: object
+                      required: [t, type, midi, velocity]
+                      properties:
+                        t: { type: integer }
+                        type: { type: string, enum: [note_on, note_off] }
+                        midi: { type: integer, minimum: 0, maximum: 127 }
+                        note: { type: string }
+                        velocity: { type: integer, minimum: 0, maximum: 127 }
+                        hand: { type: string, enum: [L, R], nullable: true }
+                  handPoses:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        t: { type: integer }
+                        leftKeyIndex: { type: integer, nullable: true }
+                        rightKeyIndex: { type: integer, nullable: true }
+
+
+
+  /history/{id}:
+    get:
+      summary: 获取单条历史详情
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HistoryItem' }
+
+  /scores:
+    get:
+      summary: 曲库列表（右栏选曲）
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, name]
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+                    composer: { type: string }
+                    durationSec: { type: integer }
+                    difficulty: { type: string, enum: [easy, medium, hard] }
+
+  /scores:
+    post:
+      summary: 上传曲谱（MIDI/MusicXML）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pieceId: { type: string }
