@@ -9,7 +9,7 @@ import mido
 from mido import Message
 import time
 from datetime import datetime
-import threading
+
 import queue
 
 
@@ -24,20 +24,32 @@ class MidiPianoRecorder:
         self.port = None
         self.recorded_events = []  # 记录所有MIDI事件
         self.start_time = None  # 录制开始时间
+        self.split_point = 60  # 中央C (MIDI 60) 作为左右手分界点
+        self.left_hand_count = 0  # 左手音符计数
+        self.right_hand_count = 0  # 右手音符计数
+
 
         self.message_queue = queue.Queue(maxsize=100)
-        
+
+
     def put_message(self, message):
         self.message_queue.put(message)
         
     def get_message(self):
         return self.message_queue.get()
-
+        
     def get_note_name(self, note_number):
         """将MIDI音符号转换为音符名称（如C4, D#5等）"""
         octave = (note_number // 12) - 1
         note = self.NOTE_NAMES[note_number % 12]
         return f"{note}{octave}"
+    
+    def get_hand_label(self, note_number):
+        """判断音符是左手还是右手弹奏（基于音高分割点）"""
+        if note_number < self.split_point:
+            return "left"
+        else:
+            return "right"
     
     def list_midi_devices(self):
         """列出所有可用的MIDI输入设备"""
@@ -106,8 +118,16 @@ class MidiPianoRecorder:
             # 音符按下
             self.active_notes[msg.note] = msg.velocity
             note_name = self.get_note_name(msg.note)
-            print(f"[{timestamp}] 🎹 按下: {note_name} (MIDI:{msg.note}) 力度:{msg.velocity}")
-            self.put_message({"action": "note_on", "key_name": note_name, "midi_id": msg.note})
+            hand = self.get_hand_label(msg.note)
+            
+            # 统计左右手使用次数
+            if msg.note < self.split_point:
+                self.left_hand_count += 1
+            else:
+                self.right_hand_count += 1
+            
+            print(f"[{timestamp}] 🎹 按下: {note_name} (MIDI:{msg.note}) 力度:{msg.velocity} {hand}")
+            self.put_message({"action": "note_on", "key_name": note_name, "midi_id": msg.note, "timestamp": timestamp, "hand": hand})
             self.display_active_notes()
             
         elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
@@ -115,30 +135,74 @@ class MidiPianoRecorder:
             if msg.note in self.active_notes:
                 del self.active_notes[msg.note]
                 note_name = self.get_note_name(msg.note)
-                print(f"[{timestamp}] 🎵 释放: {note_name} (MIDI:{msg.note})")
-                self.put_message({"action": "note_off", "key_name": note_name, "midi_id": msg.note})
+                hand = self.get_hand_label(msg.note)
+                print(f"[{timestamp}] 🎵 释放: {note_name} (MIDI:{msg.note}) {hand}")
+                self.put_message({"action": "note_off", "key_name": note_name, "midi_id": msg.note, "timestamp": timestamp, "hand": hand})
                 self.display_active_notes()
         
         elif msg.type == 'control_change':
             # 控制变化（如踏板、调制轮等）
             print(f"[{timestamp}] 🎛️  控制: CC{msg.control} = {msg.value}")
-            # self.put_message(msg)
+            
         elif msg.type == 'pitchwheel':
             # 弯音轮
             print(f"[{timestamp}] 🎚️  弯音: {msg.pitch}")
-            # self.put_message(msg)
     
     def display_active_notes(self):
-        """显示当前所有正在按下的音符"""
+        """显示当前所有正在按下的音符（按左右手分组显示）"""
         if self.active_notes:
-            notes_info = []
+            left_hand_notes = []
+            right_hand_notes = []
+            
             for note, velocity in sorted(self.active_notes.items()):
                 note_name = self.get_note_name(note)
-                notes_info.append(f"{note_name}(v:{velocity})")
-            print(f"   ► 当前按下的琴键: {', '.join(notes_info)}")
+                note_info = f"{note_name}(v:{velocity})"
+                
+                if note < self.split_point:
+                    left_hand_notes.append(note_info)
+                else:
+                    right_hand_notes.append(note_info)
+            
+            # 显示左手
+            if left_hand_notes:
+                print(f"   👈 左手: {', '.join(left_hand_notes)}")
+            
+            # 显示右手
+            if right_hand_notes:
+                print(f"   👉 右手: {', '.join(right_hand_notes)}")
+            
+            # 如果没有分组，显示所有
+            if not left_hand_notes and not right_hand_notes:
+                notes_info = [f"{self.get_note_name(n)}(v:{v})" for n, v in sorted(self.active_notes.items())]
+                print(f"   ► 当前按下的琴键: {', '.join(notes_info)}")
         else:
             print(f"   ► 当前按下的琴键: 无")
         print()
+    
+    def display_hand_statistics(self):
+        """显示左右手使用统计"""
+        total_notes = self.left_hand_count + self.right_hand_count
+        
+        if total_notes == 0:
+            print("\n📊 左右手统计: 暂无数据")
+            return
+        
+        left_percentage = (self.left_hand_count / total_notes) * 100
+        right_percentage = (self.right_hand_count / total_notes) * 100
+        
+        print("\n" + "=" * 60)
+        print("📊 左右手使用统计")
+        print("=" * 60)
+        print(f"总音符数: {total_notes}")
+        print(f"👈 左手: {self.left_hand_count} 次 ({left_percentage:.1f}%)")
+        print(f"👉 右手: {self.right_hand_count} 次 ({right_percentage:.1f}%)")
+        
+        # 显示图形化统计条
+        left_bar = "█" * int(left_percentage / 2)
+        right_bar = "█" * int(right_percentage / 2)
+        print(f"\n左手 👈 {left_bar} {left_percentage:.1f}%")
+        print(f"右手 👉 {right_bar} {right_percentage:.1f}%")
+        print("=" * 60)
     
     def save_to_midi(self, filename=None):
         """将录制的演奏保存为MIDI文件"""
@@ -205,6 +269,7 @@ class MidiPianoRecorder:
         print("\n" + "=" * 60)
         print("开始监听MIDI输入...")
         print("🔴 正在录制，所有演奏将被保存")
+        print(f"🎹 分割点: C4 (MIDI:{self.split_point}) - 低于此为左手👈，高于此为右手👉")
         print("按 Ctrl+C 停止录制")
         print("=" * 60)
         print()
@@ -219,6 +284,9 @@ class MidiPianoRecorder:
             print("\n\n" + "=" * 60)
             print("停止录制")
             print("=" * 60)
+            
+            # 显示左右手统计信息
+            self.display_hand_statistics()
             
             # 询问是否保存
             if self.recorded_events:

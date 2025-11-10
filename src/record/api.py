@@ -13,7 +13,9 @@ try:
 except ImportError:
     from fastapi.responses import StreamingResponse as EventSourceResponse
 
-from midi_record_intime import MidiPianoRecorder
+from midi_record_intime_v2 import MidiPianoRecorder
+
+from datetime import datetime
 
 
 
@@ -46,15 +48,35 @@ async def record_stream():
         while True:
             # 在线程池中运行阻塞的 get_message() 调用
             message = await loop.run_in_executor(None, recorder.get_message)
-            print(f"message: {message}")
+            # print(f"message: {message}")
             
-            yield f"{message}"
+            yield f"data: {json.dumps(message)}\n\n"
+
+
+async def record_stream_mock():
+    while True:
+        mock_data = {
+            "action": "note_on",
+            "key_name": "C4",
+            "timestamp": datetime.now().timestamp(),
+            "hand": "left"
+        }
+        yield f"data: {json.dumps(mock_data)}\n\n"
+        await asyncio.sleep(1)
 
 
 
 @app.get("/record", summary="语音转文字")
-async def chat_voice():
+async def record():
     """
     触发语音服务，返回语音转文字结果
     """
     return EventSourceResponse(record_stream())
+
+
+@app.get("/record_mock", summary="语音转文字")
+async def record_mock():
+    """
+    触发语音服务，返回语音转文字结果
+    """
+    return EventSourceResponse(record_stream_mock())

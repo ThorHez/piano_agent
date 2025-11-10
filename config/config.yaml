@@ -64,7 +64,14 @@ performance:
 
 music:
   download_url: "http://192.168.100.51:8080/download/music"
+  analyze_url: "http://192.168.100.51:8080/analyze_music"
+  fingering_url: "http://192.168.100.51:8080/fingering"
 
 midi:
   base_dir: "/Users/hezhili/PycharmProjects/piano_agent_service/data/midi"
+  nx_base_dir: ""
+
+learning:
+  start_url: "http://192.168.100.51:8015/learning_begin"
+  end_url: "http://192.168.100.51:8015/learning_end"
 

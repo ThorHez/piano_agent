@@ -11,7 +11,7 @@ from datetime import datetime
 from src.config import config
 
 # 导入路由
-from src.api import chat, performance, history, music
+from src.api import chat, performance, history, music, learning
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -77,6 +77,7 @@ app.include_router(chat.router, tags=["Chat"])
 app.include_router(performance.router, tags=["Performance"])
 app.include_router(history.router, tags=["History"])
 app.include_router(music.router, tags=["Music"])
+app.include_router(learning.router, tags=["Learning"])
 
 # 启动事件
 @app.on_event("startup")

@@ -145,6 +145,30 @@ class Config:
     def music_download_url(self) -> str:
         return self.get('music.download_url', 'http://192.168.100.51:8080/download/music')
 
+    @property
+    def learning_start_url(self) -> str:
+        return self.get('learning.start_url', 'http://192.168.100.51:8015/learning_begin')
+
+    @property
+    def learning_end_url(self) -> str:
+        return self.get('learning.end_url', 'http://192.168.100.51:8015/learning_end')
+
+    @property
+    def music_analyze_url(self) -> str:
+        return self.get('music.analyze_url', 'http://192.168.100.51:8080/analyze_music')
+
+    @property
+    def midi_base_dir(self) -> str:
+        return self.get('midi.base_dir', '/Users/hezhili/PycharmProjects/piano_agent_service/data/midi')
+
+    @property
+    def midi_nx_base_dir(self) -> str:
+        return self.get('midi.nx_base_dir', '')
+
+    @property
+    def music_fingering_url(self) -> str:
+        return self.get('music.fingering_url', 'http://192.168.100.51:8080/fingering')
+
 
 # 全局配置实例
 config = Config()

@@ -24,6 +24,7 @@ import re
 from src.database import PerformanceHistoryDB
 from datetime import datetime
 
+import traceback
 
 def merge_dicts(left: dict, right: dict) -> dict:
     """
@@ -60,7 +61,7 @@ def mock_voice_to_text(state: PianoAgentState) -> PianoAgentState:
         )
         writer(message.model_dump_json())
 
-        state["context"]["song_name"] = "大鱼"
+        state["context"]["song_name"] = "七里香"
     return state
 
 
@@ -134,6 +135,14 @@ async def voice_to_text(state: PianoAgentState) -> PianoAgentState:
     return state
 
 
+def mock_download_music(state: PianoAgentState) -> PianoAgentState:
+    download_message = Message(type=MessageType.planning, content="1. 下载歌曲", sessionId=state["context"]["session_id"], id=generate_id())
+    state["messages"].append(download_message)
+    writer = get_stream_writer()
+    writer(download_message.model_dump_json())
+    return state
+
+
 async def download_music(state: PianoAgentState) -> PianoAgentState:
     download_message = Message(type=MessageType.planning, content="1. 下载歌曲", sessionId=state["context"]["session_id"], id=generate_id())
     state["messages"].append(download_message)
@@ -144,17 +153,25 @@ async def download_music(state: PianoAgentState) -> PianoAgentState:
 
 
     music_name = state["context"]["song_name"]
-    response = await async_post(config.music_download_url, json_data={"music_name": music_name})
+    response = await async_post(config.music_download_url, json_data={"music_name": music_name}, timeout=180.0)
+    if response["status_code"] != 200:
+        raise Exception(f"下载歌曲失败: {response}")
     print(f"下载歌曲: {response}")
     return state
 
-def analyze_music(state: PianoAgentState) -> PianoAgentState:
+async def analyze_music(state: PianoAgentState) -> PianoAgentState:
     analyze_message = Message(type=MessageType.planning, content="2. 分析歌曲", sessionId=state["context"]["session_id"], id=generate_id())
     state["messages"].append(analyze_message)
     time.sleep(1)
     # get_stream_writer() 返回的是一个函数，需要直接调用
     writer = get_stream_writer()
     writer(analyze_message.model_dump_json())
+
+    music_name = state["context"]["song_name"]
+    response = await async_post(config.music_analyze_url, json_data={"music_name": music_name}, timeout=180.0)
+    print(f"分析歌曲: {response}")
+    file_path = response["body"]["file_paths"]
+    state["context"]["file_path"] = file_path
     return state
 
 def parse_params(state: PianoAgentState) -> PianoAgentState:
@@ -166,7 +183,18 @@ def parse_params(state: PianoAgentState) -> PianoAgentState:
     writer(parse_params_message.model_dump_json())
     return state
 
-def generate_trajectory(state: PianoAgentState) -> PianoAgentState:
+async def generate_trajectory(state: PianoAgentState) -> PianoAgentState:
+    parse_params_message = Message(type=MessageType.planning, content="4. 大模型基于硬件参数生成指法", sessionId=state["context"]["session_id"], id=generate_id())
+    state["messages"].append(parse_params_message)
+    time.sleep(1)
+    # get_stream_writer() 返回的是一个函数，需要直接调用
+    writer = get_stream_writer()
+    writer(parse_params_message.model_dump_json())
+
+    music_name = state["context"]["song_name"]
+    response = await async_post(config.music_fingering_url, json_data={"music_name": music_name}, timeout=180.0)
+    print(f"生成指法: {response}")
+    state["context"]["fingering_file_path"] = response["body"]["file_paths"]
     return state
 
 async def perform_music(state: PianoAgentState) -> PianoAgentState:
@@ -174,7 +202,7 @@ async def perform_music(state: PianoAgentState) -> PianoAgentState:
     异步执行音乐演奏，接收 SSE 流式数据
     同时并行接收键位数据，当演奏结束时自动停止键位数据接收
     """
-    parse_params_message = Message(type=MessageType.planning, content="4. 开始演奏", sessionId=state["context"]["session_id"], id=generate_id())
+    parse_params_message = Message(type=MessageType.planning, content="5. 开始演奏", sessionId=state["context"]["session_id"], id=generate_id())
     writer = get_stream_writer()
     writer(parse_params_message.model_dump_json())
 
@@ -192,10 +220,6 @@ async def perform_music(state: PianoAgentState) -> PianoAgentState:
                     async for line in response.aiter_lines():
                         if line.startswith('data: '):
                             data = line[6:]  # 去掉 "data: " 前缀
-                            # print(f"收到演奏数据: {data}")
-                            
-                            
-
                             data = data.strip()
                             print(f"收到演奏数据: {data}")
                             json_data = {}
@@ -224,6 +248,7 @@ async def perform_music(state: PianoAgentState) -> PianoAgentState:
                             if writer and message:
                                 writer(message.model_dump_json())
         except Exception as e:  # noqa: 捕获所有异常以确保流稳定性
+            traceback.print_exc()
             print(f"演奏流异常: {e}")
     
     async def stream_record(stop_event: asyncio.Event):
@@ -241,7 +266,7 @@ async def perform_music(state: PianoAgentState) -> PianoAgentState:
                             break
                         
                         if line.startswith('data: '):
-                            data = line[6:]  # 去掉 "data: " 前缀
+                            data = line[6:].strip()  # 去掉 "data: " 前缀
                             print(f"收到键位: {data}")
                             
                             message = Message(
@@ -283,8 +308,100 @@ async def perform_music(state: PianoAgentState) -> PianoAgentState:
                 await record_task
             except asyncio.CancelledError:
                 pass
-    
+        end_message = Message(type=MessageType.end, content="演奏结束", sessionId=state["context"]["session_id"], id=generate_id())
+        writer = get_stream_writer()
+        if writer:
+            writer(end_message.model_dump_json())
     return state
+
+
+async def perform_music_mock(state: PianoAgentState) -> PianoAgentState:
+    parse_params_message = Message(type=MessageType.planning, content="5. 开始演奏", sessionId=state["context"]["session_id"], id=generate_id())
+    writer = get_stream_writer()
+    writer(parse_params_message.model_dump_json())
+
+
+    async def stream_performance():
+        """接收演奏流数据"""
+        i = 0
+        while i < 10: 
+            message = Message(
+                type=MessageType.playing_log, 
+                content="mock", 
+                sessionId=state["context"]["session_id"], 
+                id=generate_id()
+            )
+            writer = get_stream_writer()
+            if writer and message:
+                writer(message.model_dump_json())
+            await asyncio.sleep(1)
+            i += 1
+
+
+    async def stream_record(stop_event: asyncio.Event):
+        """接收键位录音数据，当 stop_event 被设置时停止"""
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                async with client.stream(
+                    "GET",
+                    "http://127.0.0.1:8123/record_mock"
+                ) as response:
+                    async for line in response.aiter_lines():
+                        # 检查是否需要停止
+                        if stop_event.is_set():
+                            print("演奏结束，停止键位录音")
+                            break
+                        
+                        if line.startswith('data: '):
+                            data = line[6:].strip()  # 去掉 "data: " 前缀
+                            
+                            if data:
+                                print(f"收到键位: {data}")
+                                message = Message(
+                                    type=MessageType.key_position, 
+                                    content=data, 
+                                    sessionId=state["context"]["session_id"], 
+                                    id=generate_id()
+                                )
+                                
+                                writer = get_stream_writer()
+                                if writer:
+                                    writer(message.model_dump_json())
+        except asyncio.CancelledError:
+            print("键位录音任务被取消")
+            print(traceback.format_exc())
+            raise
+        except Exception as e:  # noqa: 捕获所有异常以确保流稳定性
+            print(f"键位录音流异常: {e}")
+
+    # 创建停止事件
+    stop_event = asyncio.Event()
+    
+    # 创建录音任务
+    record_task = asyncio.create_task(stream_record(stop_event))
+    
+    try:
+        # 执行演奏流（阻塞直到完成）
+        await stream_performance()
+    finally:
+        # 演奏结束，设置停止事件并取消录音任务
+        stop_event.set()
+        # 等待录音任务结束或取消
+        try:
+            await asyncio.wait_for(record_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            # 如果等待超时，强制取消任务
+            record_task.cancel()
+            try:
+                await record_task
+            except asyncio.CancelledError:
+                pass
+        end_message = Message(type=MessageType.end, content="演奏结束", sessionId=state["context"]["session_id"], id=generate_id())
+        writer = get_stream_writer()
+        if writer:
+            writer(end_message.model_dump_json())
+    return state
+
 
 
 
@@ -308,26 +425,47 @@ agent_builder = StateGraph(PianoAgentState)
 
 # define nodes
 agent_builder.add_node("mock_voice_to_text", mock_voice_to_text)
+agent_builder.add_node("mock_download_music", mock_download_music)
 agent_builder.add_node("voice_to_text", voice_to_text)
 agent_builder.add_node("download_music", download_music)
 agent_builder.add_node("analyze_music", analyze_music)
 agent_builder.add_node("parse_params", parse_params)
 agent_builder.add_node("generate_trajectory", generate_trajectory)
 agent_builder.add_node("perform_music", perform_music)
+agent_builder.add_node("perform_music_mock", perform_music_mock)
 agent_builder.add_node("save_history", save_history)
+
+
+def condition_function(state: PianoAgentState) -> str:
+    if state["context"]["mode"] == "learning":
+        return "generate_trajectory"
+    else:
+        return "mock_voice_to_text"
+
+agent_builder.add_conditional_edges(
+    source=START,
+    path=condition_function,
+    path_map={
+        "mock_voice_to_text": "mock_voice_to_text",
+        "generate_trajectory": "generate_trajectory",
+    },
+)
 
 # define edges
 # agent_builder.add_edge(START, "voice_to_text")
 # agent_builder.add_edge("voice_to_text", "download_music")
-agent_builder.add_edge(START, "mock_voice_to_text")
+# agent_builder.add_edge(START, "mock_voice_to_text")
 agent_builder.add_edge("mock_voice_to_text", "download_music")
+# agent_builder.add_edge("mock_voice_to_text", "mock_download_music")
+# agent_builder.add_edge("mock_download_music", "analyze_music")
 agent_builder.add_edge("download_music", "analyze_music")
 agent_builder.add_edge("analyze_music", "parse_params")
 agent_builder.add_edge("parse_params", "generate_trajectory")
-agent_builder.add_edge("generate_trajectory", "perform_music")
-agent_builder.add_edge("perform_music", "save_history")
+# agent_builder.add_edge("generate_trajectory", "perform_music")
+agent_builder.add_edge("generate_trajectory", "perform_music_mock")
+# agent_builder.add_edge("perform_music", "save_history")
+agent_builder.add_edge("perform_music_mock", "save_history")
 agent_builder.add_edge("save_history", END)
-
 
 agent = agent_builder.compile()
 
