@@ -230,9 +230,35 @@ class MidiPianoRecorder:
             # 设置速度 (120 BPM)
             track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(120), time=0))
             
+            # 实时消息列表（这些消息不能保存到MIDI文件中）
+            realtime_messages = [
+                'clock',           # 0xF8 - 时钟
+                'start',           # 0xFA - 启动
+                'continue',        # 0xFB - 继续
+                'stop',            # 0xFC - 停止
+                'active_sensing',  # 0xFE - 活动感知
+                'reset'            # 0xFF - 系统重置
+            ]
+            
             # 转换录制的事件为MIDI消息
             last_time = 0
+            saved_count = 0
+            skipped_count = 0
+            
             for event in self.recorded_events:
+                msg = event['message']
+                
+                # 跳过实时消息
+                if msg.type in realtime_messages:
+                    skipped_count += 1
+                    print(f"⚠️  跳过实时消息: {msg.type}")
+                    continue
+                
+                # 跳过系统独占消息（可选）
+                if msg.type == 'sysex':
+                    skipped_count += 1
+                    continue
+                
                 # 计算delta时间（以ticks为单位）
                 # mido使用ticks，我们需要将秒转换为ticks
                 # 默认：480 ticks per beat，120 BPM = 2 beats/sec = 960 ticks/sec
@@ -240,11 +266,12 @@ class MidiPianoRecorder:
                 delta_ticks = int(delta_seconds * 960)  # 960 ticks/second at 120 BPM
                 
                 # 复制消息并设置时间
-                msg = event['message'].copy()
-                msg.time = delta_ticks
-                track.append(msg)
+                msg_copy = msg.copy()
+                msg_copy.time = delta_ticks
+                track.append(msg_copy)
                 
                 last_time = event['time']
+                saved_count += 1
             
             # 添加结束标记
             track.append(mido.MetaMessage('end_of_track', time=0))
@@ -253,11 +280,17 @@ class MidiPianoRecorder:
             mid.save(filename)
             print(f"\n✓ 录制已保存到: {filename}")
             print(f"  - 总事件数: {len(self.recorded_events)}")
-            print(f"  - 录制时长: {self.recorded_events[-1]['time']:.2f} 秒")
+            print(f"  - 已保存事件: {saved_count}")
+            if skipped_count > 0:
+                print(f"  - 跳过实时消息: {skipped_count} 条")
+            if self.recorded_events:
+                print(f"  - 录制时长: {self.recorded_events[-1]['time']:.2f} 秒")
             return True
             
         except Exception as e:
             print(f"\n✗ 保存MIDI文件失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def start_recording(self):

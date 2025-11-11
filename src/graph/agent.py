@@ -54,6 +54,14 @@ def mock_voice_to_text(state: PianoAgentState) -> PianoAgentState:
         writer(message.model_dump_json())
 
         message = Message(
+            type=MessageType.voice_end, 
+            content="", 
+            sessionId=state["context"]["session_id"], 
+            id=generate_id()
+        )
+        writer(message.model_dump_json())
+
+        message = Message(
             type=MessageType.assistant, 
             content="好的，理解您想要听《大鱼》", 
             sessionId=state["context"]["session_id"], 
@@ -95,13 +103,29 @@ async def voice_to_text(state: PianoAgentState) -> PianoAgentState:
                         
                         # 根据返回的type创建消息
                         if msg_type == "user":
+                            # 发送用户的语音内容
                             message = Message(
                                 type=MessageType.user, 
                                 content=content, 
                                 sessionId=state["context"]["session_id"], 
                                 id=generate_id()
                             )
+                            writer = get_stream_writer()
+                            if writer:
+                                writer(message.model_dump_json())
+
+                            # 发送语音结束消息
+                            message = Message(
+                                type=MessageType.voice_end, 
+                                content="", 
+                                sessionId=state["context"]["session_id"], 
+                                id=generate_id()
+                            )
+                            writer(message.model_dump_json())
+                            if writer:
+                                writer(message.model_dump_json())
                         elif msg_type == "assistant":
+                            # 发送助手的回复内容
                             message = Message(
                                 type=MessageType.assistant, 
                                 content=content, 
@@ -113,15 +137,16 @@ async def voice_to_text(state: PianoAgentState) -> PianoAgentState:
                             if song_name:
                                 state["context"]["song_name"] = song_name[0]
                                 print(f"歌曲名称: {song_name[0]}")
+                            writer = get_stream_writer()
+                            if writer:
+                                writer(message.model_dump_json())
                         else:
                             # 未知类型，跳过
                             print(f"未知消息类型: {msg_type}")
                             continue
                         
                         print(f"收到语音 [{msg_type}]: {content}")
-                        writer = get_stream_writer()
-                        if writer:
-                            writer(message.model_dump_json())
+                        
                         
                         i += 1
                         # 读取2条消息后退出
@@ -438,6 +463,7 @@ agent_builder.add_node("save_history", save_history)
 
 def condition_function(state: PianoAgentState) -> str:
     if state["context"]["mode"] == "learning":
+        state["context"]["song_name"] = "unknown"
         return "generate_trajectory"
     else:
         return "mock_voice_to_text"

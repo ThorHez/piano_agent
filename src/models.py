@@ -37,6 +37,7 @@ class MessageType(str, Enum):
     key_position = "key_position"
     playing_summary = "playing_summary"
     end = "end"
+    voice_end = "voice_end"
 
 
 # Schemas
