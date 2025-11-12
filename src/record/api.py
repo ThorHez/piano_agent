@@ -181,11 +181,12 @@ async def record_stream(request: Request, do_record: bool = False):
 async def record_stream_mock():
     while True:
         random_midi_id = random.randint(21, 108)
+        hand = random.choice(["left", "right"])
         mock_data = {
             "action": "note_on",
             "key_name": "C4",
             "timestamp": datetime.now().timestamp(),
-            "hand": "left",
+            "hand": hand,
             "midi_id": random_midi_id
         }
         yield json.dumps(mock_data)
@@ -195,7 +196,7 @@ async def record_stream_mock():
             "action": "note_off",
             "key_name": "C4",
             "timestamp": datetime.now().timestamp(),
-            "hand": "left",
+            "hand": hand,
             "midi_id": random_midi_id
         }
         yield json.dumps(mock_data)
